@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en" class="intro-active">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QNext — Ask Smarter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script>
+    /* set the theme before first paint to avoid a flash */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("quillqa-theme"); } catch (e) {}
+      if (t !== "dark" && t !== "light") {
+        t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      document.documentElement.setAttribute("data-theme", t);
+    })();   
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <section class="intro-screen" id="introScreen" tabindex="0" role="region"
+           aria-label="QNext introduction. Click anywhere or press Enter to continue.">
+    <div class="intro-ambient intro-ambient-one" aria-hidden="true"></div>
+    <div class="intro-ambient intro-ambient-two" aria-hidden="true"></div>
+    <div class="intro-particles" aria-hidden="true">
+      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
+    </div>
+    <svg class="intro-logo-trace intro-logo-trace-left" id="introLogoTraceLeft"
+         viewBox="0 0 100 100" aria-hidden="true">
+      <path pathLength="100" d="M 12 82 L 38 53 L 55 68 L 89 18" />
+    </svg>
+    <svg class="intro-logo-trace intro-logo-trace-right" id="introLogoTraceRight"
+         viewBox="0 0 100 100" aria-hidden="true">
+      <path pathLength="100" d="M 12 82 L 38 53 L 55 68 L 89 18" />
+    </svg>
+    <div class="intro-robot" id="introRobotLeft" aria-hidden="true"></div>
+    <div class="intro-robot" id="introRobotRight" aria-hidden="true"></div>
+    <svg class="intro-glass" id="introGlass" viewBox="0 0 1000 700"
+         preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="glassTint" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#e8d7ff" stop-opacity=".11" />
+          <stop offset=".48" stop-color="#8e71ff" stop-opacity=".025" />
+          <stop offset="1" stop-color="#4bd5e8" stop-opacity=".09" />
+        </linearGradient>
+        <linearGradient id="glassReflection" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#ffffff" stop-opacity=".14" />
+          <stop offset=".38" stop-color="#d9c4ff" stop-opacity=".025" />
+          <stop offset=".7" stop-color="#ffffff" stop-opacity=".075" />
+          <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id="glassImpactGlow">
+          <stop offset="0" stop-color="#f6eaff" stop-opacity=".8" />
+          <stop offset=".16" stop-color="#c392ff" stop-opacity=".3" />
+          <stop offset="1" stop-color="#a86cf0" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <rect class="glass-pane" x="1" y="1" width="998" height="698" rx="28"
+            fill="url(#glassReflection)" />
+      <g class="glass-shards" id="glassShards"></g>
+      <circle class="glass-impact" id="glassImpact" cx="500" cy="350" r="0"
+              fill="url(#glassImpactGlow)" />
+      <path class="glass-crack" id="glassCrack" />
+    </svg>
+    <div class="intro-content">
+      <svg class="intro-mark" viewBox="0 0 32 32" fill="none"
+           stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+           stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 27 11 18 16 23 28 5"/>
+        <path d="M20 5h8v8"/>
+      </svg>
+      <p class="intro-brand-sub">ASK SMARTER</p>
+      <h1 class="intro-title">QNext</h1>
+      <p class="intro-tagline">Ask Smarter.</p>
+      <p class="intro-status" id="introStatus" aria-live="polite">Understanding your questions...</p>
+    </div>
+  </section>
+
+  <div id="appShell" inert aria-hidden="true">
+  <!-- ======================= header ======================= -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" fill="none"
+             stroke="currentColor" stroke-width="3.2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 27 11 18 16 23 28 5"/>
+          <path d="M20 5h8v8"/>
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">QNext</span>
+          <span class="brand-sub">Ask Smarter</span>
+        </div>
+      </div>
+      <div class="brand-walker" aria-hidden="true">
+        <div id="chatbotAnimation"></div>
+      </div>
+      <div class="topbar-actions">
+        <div id="datasetPill" class="pill pill-empty" title="No dataset loaded">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">No dataset loaded</span>
+        </div>
+        <button id="themeBtn" class="icon-btn" type="button"
+                aria-label="Switch to dark mode" title="Switch theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+          </svg>
+        </button>
+        <button id="dashBtn" class="icon-btn dash-btn" type="button" aria-haspopup="dialog"
+                aria-label="Open dashboard" title="Dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" aria-hidden="true">
+            <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
+          </svg>
+          <span>Dashboard</span>
+          <span class="dash-count" id="dashCount" hidden>0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ==================== 1 · dataset ==================== -->
+    <section class="panel" id="panelDataset">
+      <div class="panel-head">
+        <span class="step-num">1</span>
+        <h2>Dataset</h2>
+        <p class="panel-sub">Upload a file or paste text — it gets chunked into passages and indexed.</p>
+      </div>
+
+      <div class="seg" role="tablist">
+        <button class="seg-btn is-active" data-tab="file" type="button">Upload file</button>
+        <button class="seg-btn" data-tab="paste" type="button">Paste text</button>
+      </div>
+
+      <!-- file tab -->
+      <div class="tab-body is-active" data-body="file">
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Choose a file">
+          <div class="dz-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+            </svg>
+          </div>
+          <p class="dz-title">Drag &amp; drop a file, or <span class="dz-cta">browse</span></p>
+          <p class="dz-hint">PDF · DOCX · PPTX · TXT · MD · CSV · JSON — up to 25&nbsp;MB</p>
+          <input type="file" id="fileInput" hidden
+                 accept=".txt,.md,.pdf,.docx,.pptx,.csv,.json" />
+        </div>
+        <button class="btn btn-ghost btn-block" id="sampleBtn" type="button">Load sample dataset instead</button>
+      </div>
+
+      <!-- paste tab -->
+      <div class="tab-body" data-body="paste">
+        <textarea id="pasteText" class="paste-area" rows="8"
+          placeholder="Paste two or more paragraphs of text here…"></textarea>
+        <button class="btn btn-primary btn-block" id="pasteBtn" type="button">Index pasted text</button>
+      </div>
+
+      <!-- ingest result -->
+      <div id="ingestStatus" class="ingest-status" hidden></div>
+
+      <!-- executive summary -->
+      <button class="btn btn-ghost btn-block" id="summaryBtn" type="button" disabled
+              aria-label="Generate an executive summary of the loaded dataset">
+        <span id="summaryBtnLabel">Generate executive summary</span>
+      </button>
+      <div class="exec-summary" id="execSummary" hidden>
+        <div class="exec-head">
+          <p class="exec-title">Executive summary</p>
+          <button class="mpill mpill-btn" id="copySummaryBtn" type="button">Copy</button>
+        </div>
+        <ul class="exec-bullets" id="execBullets"></ul>
+        <p class="exec-note" id="execNote" hidden></p>
+      </div>
+    </section>
+
+    <!-- ======================= 2 · ask ======================= -->
+    <section class="panel panel-center" id="panelAsk">
+      <div class="panel-head">
+        <span class="step-num">2</span>
+        <h2>Ask a question</h2>
+      </div>
+
+      <form id="askForm" class="ask-form" autocomplete="off">
+        <div class="ask-wrap" id="askWrap">
+          <input id="questionInput" class="ask-input" type="text"
+                 placeholder="Ask by typing or use the microphone…" maxlength="300"
+                 aria-label="Type your question or speak it with the microphone" />
+        </div>
+        <button type="button" id="micBtn" class="mic-btn" hidden
+                aria-label="Ask by voice" title="Ask by voice">
+          <span id="micAnimation" class="mic-animation" aria-hidden="true"></span>
+          <svg class="mic-fallback" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <rect x="9" y="3" width="6" height="11" rx="3"/>
+            <path d="M5 11a7 7 0 0 0 14 0"/>
+            <path d="M12 18v3"/>
+          </svg>
+        </button>
+      </form>
+      <div class="chips" id="exampleChips">
+      </div>
+
+      <!-- answer area -->
+      <div id="answerArea" class="answer-area">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-art">“?”</div>
+          <p class="empty-title">Ask something about your dataset</p>
+          <p class="empty-sub">Your answer will appear here.</p>
+        </div>
+
+        <div class="skeleton" id="skeleton" hidden>
+          <div class="sk-line sk-tag"></div>
+          <div class="sk-line w-90"></div>
+          <div class="sk-line w-100"></div>
+          <div class="sk-line w-75"></div>
+        </div>
+
+        <article class="answer-card" id="answerCard" hidden>
+          <div class="answer-top">
+            <span class="answer-label" id="answerLabel">Answer</span>
+            <span class="cat-tag" id="answerCategory">Factual</span>
+          </div>
+          <p class="answer-text" id="answerText"></p>
+          <div class="simple-block" id="simpleBlock" hidden>
+            <p class="simple-title" id="simpleTitle">Key points — simplified</p>
+            <ul id="simplePoints"></ul>
+          </div>
+        </article>
+      </div>
+
+      <div id="recentList" class="recent" hidden>
+        <p class="recent-title">Recent queries</p>
+        <ul id="recentItems"></ul>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+  </footer>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- ==================== 3 · dashboard (slide-in panel) ==================== -->
+  <div class="drawer-overlay" id="dashDrawer" hidden>
+    <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dashTitle">
+      <div class="drawer-head">
+        <p class="drawer-title" id="dashTitle">Dashboard</p>
+        <button class="modal-close" id="dashClose" type="button" aria-label="Close dashboard">&times;</button>
+      </div>
+      <p class="drawer-sub">Live session metrics, updated after every question.</p>
+
+      <div id="panelDash">
+        <div class="stat-grid">
+          <div class="stat">
+            <span class="stat-value" id="statTotal">0</span>
+            <span class="stat-label">Questions asked</span>
+          </div>
+          <div class="stat stat-ok">
+            <span class="stat-value" id="statAnswered">0</span>
+            <span class="stat-label">Answered</span>
+          </div>
+          <div class="stat stat-bad">
+            <span class="stat-value" id="statNoAnswer">0</span>
+            <span class="stat-label">No info</span>
+          </div>
+          <div class="stat stat-time">
+            <span class="stat-value" id="statTime">0<span class="stat-unit">ms</span></span>
+            <span class="stat-label">Avg response</span>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <p class="chart-title">Query categories</p>
+          <div class="chart-wrap"><canvas id="categoryChart"></canvas></div>
+        </div>
+
+        <div class="dash-actions">
+          <button class="btn btn-ghost" id="exportCsvBtn" type="button" disabled
+                  title="Download this session's Q&A log as CSV">Export CSV</button>
+          <button class="btn btn-ghost" id="exportPdfBtn" type="button" disabled
+                  title="Download this session's Q&A report as PDF">Export PDF</button>
+        </div>
+        <button class="btn btn-ghost btn-block" id="resetBtn" type="button">Reset session</button>
+      </div>
+    </aside>
+  </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='vendor/jspdf.umd.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/jspdf.plugin.autotable.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='speech-input.js') }}"></script>
+  <script src="{{ url_for('static', filename='report.js') }}"></script>
+  <script src="{{ url_for('static', filename='intro.js') }}"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+  <script>
+    if (
+      window.lottie &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      const micAnimation = window.lottie.loadAnimation({
+        container: document.getElementById("micAnimation"),
+        renderer: "svg",
+        loop: true,
+        autoplay: true,
+        path: "{{ url_for('static', filename='mic-animation.json') }}",
+      });
+      micAnimation.addEventListener("DOMLoaded", () => {
+        document.getElementById("micBtn").classList.add("has-animation");
+      });
+
+      const robotAnimation = {
+        renderer: "svg",
+        loop: true,
+        autoplay: true,
+        path: "{{ url_for('static', filename='chatbot.json') }}",
+      };
+      window.lottie.loadAnimation({
+        ...robotAnimation,
+        container: document.getElementById("chatbotAnimation"),
+      });
+      window.lottie.loadAnimation({
+        ...robotAnimation,
+        container: document.getElementById("introRobotLeft"),
+      });
+      window.lottie.loadAnimation({
+        ...robotAnimation,
+        container: document.getElementById("introRobotRight"),
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+{
+  "Who wrote Hamlet?": {
+    "retrieval_score": 0.2519,
+    "status": "answered",
+    "passage_index": 13
+  },
+  "What is machine learning?": {
+    "retrieval_score": 0.2814,
+    "status": "answered",
+    "passage_index": 2
+  },
+  "What is overfitting?": {
+    "retrieval_score": 0.2681,
+    "status": "answered",
+    "passage_index": 8
+  },
+  "When was Shakespeare born?": {
+    "retrieval_score": 0.2534,
+    "status": "answered",
+    "passage_index": 13
+  },
+  "What is the capital of France?": {
+    "retrieval_score": 0.0,
+    "status": "no_answer",
+    "passage_index": null
+  },
+  "What is a confusion matrix?": {
+    "retrieval_score": 0.4873,
+    "status": "answered",
+    "passage_index": 7
+  },
+  "How does a neural network work?": {
+    "retrieval_score": 0.3467,
+    "status": "answered",
+    "passage_index": 9
+  },
+  "Compare CNN and RNN": {
+    "retrieval_score": 0.0,
+    "status": "no_answer",
+    "passage_index": null
+  }
+}
