@@ -37,3 +37,8 @@ instance/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local verification artifacts and source snapshots
+/docs/verification/
+/node_modules/
+/.zcodeignore

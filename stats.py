@@ -6,6 +6,8 @@ app.py owns the session -> stats mapping.
 """
 
 import re
+import threading
+from collections import Counter, deque
 from collections import OrderedDict
 
 
@@ -66,3 +68,38 @@ class SessionStats:
             "avg_response_ms": round(self.average_response_ms(), 1),
             "categories": dict(self.categories),
         }
+
+
+class AIStats:
+    """Separate privacy-safe AI counters; bounded rolling latency samples."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.counts = Counter()
+        self.models, self.slots, self.failures = Counter(), Counter(), Counter()
+        self.latencies = deque(maxlen=200)
+
+    def record(self, result):
+        with self._lock:
+            if not result.get('enabled'):
+                self.counts['disabled_requests'] += 1
+                return
+            self.counts['requests'] += 1
+            self.counts[result['status']] += 1
+            self.counts['provider_attempts'] += result.get('attempts', 0)
+            self.counts['failovers'] += result.get('failover_count', 0)
+            if result.get('evidence_state') == 'no_sufficient_answer':
+                self.counts['no_document_answer_requests'] += 1
+            self.failures.update(result.get('failures', []))
+            if result.get('model'):
+                self.models[result['model']] += 1
+                self.slots[str(result['credential_slot'])] += 1
+            self.latencies.append(result.get('latency_ms', 0))
+
+    def snapshot(self):
+        with self._lock:
+            ordered = sorted(self.latencies)
+            return {'counts': dict(self.counts), 'models': dict(self.models), 'slots': dict(self.slots),
+                    'failures': dict(self.failures), 'latency_sample_size': len(ordered),
+                    'p50_ms': ordered[(len(ordered) - 1) // 2] if ordered else None,
+                    'p95_ms': ordered[max(0, __import__('math').ceil(len(ordered) * .95) - 1)] if len(ordered) >= 20 else None,
+                    'latency_window': 'last 200 completed AI requests; includes failures'}

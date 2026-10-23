@@ -193,6 +193,23 @@
         <h2>Ask a question</h2>
       </div>
 
+      <div class="ai-controls">
+        <label class="ai-toggle" for="aiMode">
+          <span class="ai-toggle-label">AI explanations</span>
+          <span class="ai-switch">
+            <input id="aiMode" type="checkbox" role="switch" aria-label="AI explanations"
+                   {% if ai_default_enabled %}checked{% endif %} />
+            <span class="ai-switch-track" aria-hidden="true">
+              <span class="ai-switch-thumb">
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="m8 3 1.4 3.6L13 8l-3.6 1.4L8 13 6.6 9.4 3 8l3.6-1.4L8 3Z" fill="currentColor"/>
+                </svg>
+              </span>
+            </span>
+          </span>
+          <span class="ai-toggle-state" id="aiModeLabel" aria-hidden="true">{{ 'ON' if ai_default_enabled else 'OFF' }}</span>
+        </label>
+      </div>
       <form id="askForm" class="ask-form" autocomplete="off">
         <div class="ask-wrap" id="askWrap">
           <input id="questionInput" class="ask-input" type="text"
@@ -218,7 +235,7 @@
       <div id="answerArea" class="answer-area">
         <div class="empty-state" id="emptyState">
           <div class="empty-art">“?”</div>
-          <p class="empty-title">Ask something about your dataset</p>
+          <p class="empty-title">Ask with AI or about your dataset</p>
           <p class="empty-sub">Your answer will appear here.</p>
         </div>
 
@@ -231,15 +248,23 @@
 
         <article class="answer-card" id="answerCard" hidden>
           <div class="answer-top">
-            <span class="answer-label" id="answerLabel">Answer</span>
+            <span class="answer-label" id="answerLabel">Retrieved Text</span>
             <span class="cat-tag" id="answerCategory">Factual</span>
           </div>
           <p class="answer-text" id="answerText"></p>
+          <p id="retrievalNote" class="evidence-note" hidden></p>
+          <div id="retrievalSources" class="retrieval-sources"></div>
           <div class="simple-block" id="simpleBlock" hidden>
             <p class="simple-title" id="simpleTitle">Key points — simplified</p>
             <ul id="simplePoints"></ul>
           </div>
         </article>
+        <section class="ai-panel" id="aiPanel" hidden aria-labelledby="aiHeading" aria-live="polite">
+          <h3 id="aiHeading">AI-Generated Explanation</h3>
+          <p id="aiBasis" class="ai-basis"></p>
+          <p id="aiText" class="ai-text"></p>
+          <p id="aiDetails" class="ai-details"></p>
+        </section>
       </div>
 
       <div id="recentList" class="recent" hidden>
@@ -307,6 +332,7 @@
   <script src="{{ url_for('static', filename='report.js') }}"></script>
   <script src="{{ url_for('static', filename='intro.js') }}"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+  <script src="{{ url_for('static', filename='ai-panel.js') }}"></script>
   <script src="{{ url_for('static', filename='script.js') }}"></script>
   <script>
     if (

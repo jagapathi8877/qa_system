@@ -2,7 +2,7 @@
  * report.js — Export Q&A Report: pure functions over the session log.
  *
  *   computeStats(records)          → dashboard-matching summary numbers
- *   buildRows(records, timeFmt)    → table rows shared by CSV and PDF
+ *   buildRows(records, timeFmt)    → CSV table rows
  *   buildCsv(records)              → CSV string (UTF-8 BOM added by caller's
  *                                    Blob; Excel-safe escaping + injection guard)
  *   buildPdf(records, meta, jsPDF) → jsPDF document (jsPDF ctor injected so
@@ -113,81 +113,86 @@
      characters the UI produces and drop anything outside Latin-1. */
   var CHAR_MAP = {
     "—": "-", "–": "-", "’": "'", "‘": "'", "“": '"', "”": '"',
-    "→": "->", "←": "<-", "·": "-", "…": "...", "\u00a0": " ",
+    "→": "->", "←": "<-", "·": "-", "•": "-", "…": "...", "\u00a0": " ",
   };
 
   function pdfSafe(text) {
     var s = text == null ? "" : String(text);
-    s = s.replace(/[—–’‘“”→←·…\u00a0]/g, function (ch) { return CHAR_MAP[ch] || " "; });
+    s = s.replace(/[—–’‘“”→←·•…\u00a0]/g, function (ch) { return CHAR_MAP[ch] || " "; });
     // eslint-disable-next-line no-control-regex
     return s.replace(/[^\x09\x0a\x0d\x20-\xff]/g, "");
   }
 
   function buildPdf(records, meta, jsPDFCtor) {
-    var stats = computeStats(records);
-    var doc = new jsPDFCtor({ orientation: "landscape", unit: "mm", format: "a4" });
-    var W = doc.internal.pageSize.getWidth();
+    var doc = new jsPDFCtor({ orientation: "portrait", unit: "mm", format: "a4" });
+    var W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    var margin = 20, bottom = H - 22, y = margin;
+    var formatExplanation = meta && meta.formatExplanation || function (text) { return String(text); };
+    doc.setTextColor(0);
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("QNext - Q&A Report", 14, 14);
+    function nextPage() {
+      doc.addPage();
+      y = margin;
+    }
+    function write(text, size, bold) {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(size);
+      var lines = doc.splitTextToSize(pdfSafe(text), W - margin * 2);
+      var leading = size * 0.352778 * 1.45;
+      lines.forEach(function (line) {
+        if (y + leading > bottom) nextPage();
+        doc.text(line, margin, y);
+        y += leading;
+      });
+    }
+    function section(label, text) {
+      // Keep each heading with the opening lines of its content.
+      if (y + 23 > bottom) nextPage();
+      write(label, 11, true);
+      y += 1;
+      write(text, 11, false);
+      y += 5;
+    }
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+    write("QNext - Q&A Report", 18, true);
+    y += 3;
     var created = meta && meta.exportDate ? meta.exportDate : new Date().toLocaleString();
-    var dataset = (meta && meta.datasetName) || "Unknown dataset";
-    doc.text("Dataset: " + pdfSafe(dataset), 14, 20);
-    doc.text("Exported: " + created, 14, 24.5);
-
-    doc.setFontSize(10);
-    var avgConf = stats.avgConfidence == null ? "-" : Math.round(stats.avgConfidence * 100) + "%";
-    var avgLat = stats.avgLatency == null ? "-" : Math.round(stats.avgLatency) + " ms";
-    var cats = Object.keys(stats.categories)
-      .map(function (k) { return k + " " + stats.categories[k]; })
-      .join(", ") || "-";
-    doc.text(
-      "Questions: " + stats.total +
-      "   |   Answered: " + stats.answered + " (" + Math.round(stats.answeredRate * 100) + "%)" +
-      "   |   No info: " + stats.noInfo +
-      "   |   Avg confidence: " + avgConf +
-      "   |   Avg latency: " + avgLat,
-      14, 30
-    );
-    doc.text("Categories: " + pdfSafe(cats), 14, 35);
-
-    var rows = buildRows(records, "short").map(function (row) {
-      return row.map(pdfSafe);
+    write("Exported: " + created, 10, false);
+    write("Questions: " + records.length, 10, false);
+    y += 9;
+    if (!records.length) write("No questions in this session.", 11, false);
+    records.forEach(function (record, index) {
+      var result = record.result || record;
+      var retrieval = result.retrieval || result;
+      var ai = result.ai;
+      var explanation = "AI explanations were off for this question.";
+      if (ai && ai.status === "success" && ai.answer) explanation = formatExplanation(ai.answer);
+      else if (ai && ai.status === "pending") explanation = "AI explanation is still being generated.";
+      else if (ai && ai.status !== "disabled") explanation = "AI explanation was unavailable for this question.";
+      var retrievedText = retrieval.answer || (retrieval.reason === "no_dataset"
+        ? "No dataset was loaded. This question used general AI knowledge."
+        : "No retrieved text was available for this question.");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      var leading = 11 * 0.352778 * 1.45;
+      var height = 3 * (leading + 6) + 5;
+      [record.question || "", retrievedText, explanation].forEach(function (text) {
+        height += doc.splitTextToSize(pdfSafe(text), W - margin * 2).length * leading;
+      });
+      // Keep short Q&A entries together; longer entries continue across pages.
+      if (y + 38 > bottom || (height <= bottom - margin && y + height > bottom)) nextPage();
+      section("Question " + (index + 1), record.question || "");
+      section("Retrieved Text", retrievedText);
+      section("AI Explanation", explanation);
+      y += 5;
     });
-
-    doc.autoTable({
-      head: [COLUMNS],
-      body: rows,
-      startY: 39,
-      styles: { fontSize: 7.5, cellPadding: 1.4, overflow: "linebreak", font: "helvetica" },
-      headStyles: { fillColor: [118, 43, 42], textColor: [255, 249, 239], fontStyle: "bold" },
-      alternateRowStyles: { fillColor: [241, 232, 212] },
-      columnStyles: {
-        0: { cellWidth: 9 },        // No
-        1: { cellWidth: 20 },       // Time
-        2: { cellWidth: 52 },       // Question (wraps)
-        3: { cellWidth: 20 },       // Category
-        5: { cellWidth: 16 },       // Confidence
-        6: { cellWidth: 15 },       // Latency
-        7: { cellWidth: 16 },       // Retrieval score
-        8: { cellWidth: 17 },       // Retriever
-        9: { cellWidth: 14 },       // Source
-        10: { cellWidth: 18 },      // Status
-      },
-      didDrawPage: function () {
-        doc.setFontSize(8);
-        doc.setTextColor(120);
-        doc.text(
-          "QNext session report - page " + doc.internal.getNumberOfPages(),
-          14, doc.internal.pageSize.getHeight() - 6
-        );
-        doc.setTextColor(0);
-      },
-    });
+    var total = doc.internal.getNumberOfPages();
+    for (var page = 1; page <= total; page++) {
+      doc.setPage(page);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text("Page " + page + " of " + total, W / 2, H - 12, { align: "center" });
+    }
     return doc;
   }
 

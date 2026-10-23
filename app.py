@@ -22,6 +22,11 @@ import time
 import uuid
 import math
 import secrets
+import copy
+from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).with_name('.env'), override=False)
 
 from flask import Flask, jsonify, render_template, request, session, g
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
@@ -30,9 +35,18 @@ import ingestion
 import qa_model
 import summary_engine
 from qa_engine import QAEngine
-from stats import SessionStats, classify_query
+from stats import SessionStats, AIStats, classify_query
+from ai_explainer import AIExplainer, disabled_result
+from gemini_gateway import classify_error, log_event
+import logging
+
+ai_explainer = AIExplainer()
 
 app = Flask(__name__)
+_ai_logger = logging.getLogger('qnext.ai')
+_ai_logger.setLevel(logging.INFO)
+if not _ai_logger.hasHandlers():
+    _ai_logger.addHandler(logging.StreamHandler())
 _configured_secret = os.environ.get('QUILLQA_SECRET')
 if os.environ.get('QUILLQA_ENV') == 'production' and (not _configured_secret or len(_configured_secret) < 32):
     raise RuntimeError('Production requires a private QUILLQA_SECRET of at least 32 characters.')
@@ -59,7 +73,8 @@ def _state(create: bool = False) -> dict:
         st = getattr(g, 'qa_state', None) or _STATE.get(sid)
         if st is None:
             st = {'engine': None, 'stats': SessionStats(), 'source': None,
-                  'lock': threading.RLock(), 'last_seen': time.monotonic(), 'history': []}
+                  'lock': threading.RLock(), 'last_seen': time.monotonic(), 'history': [],
+                  'ai_stats': AIStats(), 'dataset_revision': uuid.uuid4().hex}
         if create and sid not in _STATE:
             now = time.monotonic()
             for key, value in list(_STATE.items()):
@@ -129,7 +144,7 @@ def _payload():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", ai_default_enabled=ai_explainer.config.enabled)
 
 
 def _ingest(raw_text: str, source_label: str):
@@ -145,6 +160,7 @@ def _ingest(raw_text: str, source_label: str):
         return _error(str(exc), 503)
     state["engine"] = engine
     state["source"] = source_label
+    state['dataset_revision'] = uuid.uuid4().hex
     return jsonify({
         "status": "ok",
         "message": f"Dataset loaded — {engine.passage_count} passages indexed",
@@ -197,6 +213,7 @@ def dataset():
         state["engine"] = None
         state["source"] = None
         state["stats"] = SessionStats()
+        state['ai_stats'] = AIStats()
         state['history'] = []
         with _STATE_LOCK:
             _STATE.pop(session.get('sid'), None)
@@ -312,6 +329,12 @@ def ask():
         return _error('Please type a nonempty question.')
     if len(question) > 1000:
         return _error('Questions must contain at most 1000 characters.')
+    # Omitted mode is retrieval-only for legacy API consumers. The UI sends
+    # its default-ON preference explicitly; strings such as "false" are invalid.
+    ai_mode = payload.get('ai_mode', False)
+    defer_ai = payload.get('defer_ai', False)
+    if type(ai_mode) is not bool or type(defer_ai) is not bool:
+        return _error('ai_mode and defer_ai must be JSON booleans.')
     retriever = payload.get("retriever", "tfidf")
     if retriever not in ("tfidf", "semantic"):
         return _error('Retriever must be tfidf or semantic.')
@@ -328,30 +351,110 @@ def ask():
             return _error('Threshold must be a finite number between 0 and 0.9.')
 
     engine = _engine()
-    if engine is None:
-        return _error('Upload or paste a dataset before asking questions.', 409)
+    if engine is None and (not ai_mode or not ai_explainer.config.enabled):
+        return _error('Turn on AI explanations or load a dataset before asking questions.'
+                      if ai_explainer.config.enabled else 'AI is disabled. Load a dataset before asking questions.', 409)
 
     try:
-        result = engine.ask(question, threshold=threshold, retriever=retriever)
+        # General questions also need durable, session-scoped history for the
+        # deferred explanation route. Do not create an empty retrieval index.
+        state = _state(create=True)
     except RuntimeError as exc:
-        # e.g. semantic model can't be loaded (offline first run)
         return _error(str(exc), 503)
-    except Exception:
-        app.logger.exception('QA request failed')
-        return _error('The answer could not be completed. Please try again.', 500)
+    if engine is None:
+        result = {'status': 'no_answer', 'reason': 'no_dataset', 'answer': None,
+                  'sources': [], 'response_time_ms': 0, 'retriever': None,
+                  'confidence': None, 'retrieval_score': None}
+    else:
+        try:
+            result = engine.ask(question, threshold=threshold, retriever=retriever)
+        except RuntimeError as exc:
+            # e.g. semantic model can't be loaded (offline first run)
+            return _error(str(exc), 503)
+        except Exception:
+            app.logger.exception('QA request failed')
+            return _error('The answer could not be completed. Please try again.', 500)
     result["category"] = result.get("category") or classify_query(question)
-    state = _state()
-    state["stats"].record(
-        category=result["category"],
-        answered=result["status"] in ("answered", "summarized"),
-        response_ms=result["response_time_ms"],
-    )
-    result['corpus_id'] = engine.corpus_hash
+    if engine is not None:
+        state["stats"].record(
+            category=result["category"],
+            answered=result["status"] in ("answered", "summarized"),
+            response_ms=result["response_time_ms"],
+        )
+    result['corpus_id'] = engine.corpus_hash if engine is not None else None
     result['source'] = state['source']
-    state['history'].append({'question': question, 'corpus_id': engine.corpus_hash,
-                             'source': state['source'], 'result': dict(result)})
+    retrieval = copy.deepcopy(result)
+    request_id = uuid.uuid4().hex
+    if ai_mode and defer_ai and ai_explainer.config.enabled:
+        ai = {'enabled': True, 'status': 'pending', 'basis': 'unavailable', 'answer': None}
+    else:
+        ai = _explain(question, retrieval, engine) if ai_mode else disabled_result()
+        state['ai_stats'].record(ai)
+    result.update(retrieval=retrieval, ai=ai, request_id=request_id)
+    state['history'].append({'question': question, 'corpus_id': result['corpus_id'],
+                             'source': state['source'], 'request_id': request_id,
+                             'dataset_revision': state['dataset_revision'],
+                             'result': copy.deepcopy(result)})
     state['history'] = state['history'][-1000:]
     return jsonify(result)
+
+
+def _explain(question, retrieval, engine):
+    started = time.perf_counter()
+    try:
+        result = ai_explainer.explain(question, retrieval, engine)
+    except Exception as exc:
+        # Deliberate isolation boundary. No provider exception text or traceback
+        # may leak secrets/prompts; retrieval has already succeeded independently.
+        failure = classify_error(exc)
+        category = failure.category
+        log_event('ai_explanation', category=category, outcome='failure', exception_type=type(exc).__name__,
+                  http_status=failure.http_status, reason=failure.reason,
+                  latency_ms=round((time.perf_counter() - started) * 1000))
+        result = {'enabled': True, 'status': 'unavailable', 'basis': 'unavailable', 'answer': None,
+                'error_category': category, 'message': 'AI is unavailable. The retrieved result is still available.',
+                'latency_ms': round((time.perf_counter() - started) * 1000), 'attempts': 0,
+                'failover_count': 0, 'failures': [category]}
+    if engine is None and result['status'] == 'unavailable':
+        result['message'] = 'AI could not answer right now. Try again, or load a dataset to use document retrieval.'
+    return result
+
+
+@app.route('/api/explain', methods=['POST'])
+def explain():
+    """Complete an explicitly AI-enabled ask, without rerunning retrieval.
+
+    History and corpus identity are checked under the existing session lock.
+    A replacement/reset/stale ID cannot send another document's evidence.
+    Duplicate completion requests return the saved result without regeneration.
+    """
+    payload = _payload()
+    if not isinstance(payload.get('request_id'), str) or type(payload.get('ai_mode')) is not bool:
+        return _error('Send a request_id and a boolean ai_mode.')
+    state = _state()
+    engine = state['engine']
+    record = next((r for r in reversed(state['history']) if r['request_id'] == payload['request_id']), None)
+    corpus_id = engine.corpus_hash if engine is not None else None
+    if (record is None or record['corpus_id'] != corpus_id
+            or record['dataset_revision'] != state['dataset_revision']):
+        return _error('This question no longer belongs to the active document. Ask it again.', 409)
+    result = record['result']
+    if result['ai']['status'] != 'pending':
+        return jsonify({'ai': result['ai'], 'request_id': record['request_id']})
+    ai = _explain(record['question'], result['retrieval'], engine) if payload['ai_mode'] else disabled_result()
+    result['ai'] = ai
+    state['ai_stats'].record(ai)
+    return jsonify({'ai': ai, 'request_id': record['request_id']})
+
+
+@app.route('/api/ai/status')
+def ai_status():
+    return jsonify(ai_explainer.config.public_status())
+
+
+@app.route('/api/ai/stats')
+def ai_stats():
+    return jsonify(_state()['ai_stats'].snapshot())
 
 
 @app.route("/api/stats")

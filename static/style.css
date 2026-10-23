@@ -77,6 +77,56 @@ html[data-theme="dark"] {
 
 [hidden] { display: none !important; }
 
+/* AI explanations extend the existing answer area and theme tokens. */
+.ai-controls { margin: 0 0 18px; }
+.ai-toggle {
+  --toggle-thumb: #f6f0ff;
+  display: inline-flex; align-items: center; gap: 12px;
+  min-height: 36px; font-size: 13px; cursor: pointer; user-select: none;
+}
+.ai-toggle-label { font-weight: 600; color: var(--ink); }
+.ai-switch { position: relative; display: inline-block; width: 46px; height: 26px; flex: 0 0 46px; }
+.ai-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; z-index: 1; cursor: pointer; }
+.ai-switch-track {
+  display: block; position: absolute; inset: 0; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--bg) 80%, transparent);
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+.ai-switch-thumb {
+  position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+  display: grid; place-items: center; border-radius: 50%;
+  background: var(--faint); color: var(--surface);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--bg) 50%, transparent);
+  transition: transform 180ms cubic-bezier(.2,.7,.2,1), background 180ms ease, color 180ms ease;
+}
+.ai-switch-thumb svg { width: 12px; height: 12px; opacity: .65; transition: opacity 180ms ease; }
+.ai-switch input:checked + .ai-switch-track {
+  background: linear-gradient(115deg, var(--brand), color-mix(in srgb, var(--brand) 74%, var(--surface)));
+  border-color: color-mix(in srgb, var(--brand) 85%, var(--line-strong));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--toggle-thumb) 14%, transparent);
+}
+.ai-switch input:checked + .ai-switch-track .ai-switch-thumb { transform: translateX(20px); background: var(--toggle-thumb); color: var(--brand); }
+.ai-switch input:checked + .ai-switch-track svg { opacity: 1; }
+.ai-switch input:focus-visible + .ai-switch-track { outline: 2px solid var(--brand); outline-offset: 4px; }
+.ai-switch input:disabled { cursor: wait; }
+.ai-switch input:disabled + .ai-switch-track { opacity: .65; }
+.ai-toggle-state { min-width: 3ch; color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.ai-toggle:has(input:checked) .ai-toggle-state { color: var(--brand-deep); }
+@media (prefers-reduced-motion: reduce) {
+  .ai-switch-track, .ai-switch-thumb, .ai-switch-thumb svg { transition: none; }
+}
+.ai-details, .evidence-note { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.ai-panel { margin-top: 18px; padding: 20px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius); }
+.ai-panel h3 { margin: 0 0 10px; font-size: 15px; color: var(--brand-deep); }
+.ai-basis { font-size: 12px; font-weight: 600; color: var(--muted); line-height: 1.6; }
+.ai-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; color: var(--ink); }
+.ai-panel[aria-busy="true"] .ai-text { color: var(--muted); }
+.retrieval-sources { margin-top: 14px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.retrieval-sources details { border-top: 1px solid var(--line); padding: 10px 0; }
+.retrieval-sources summary { color: var(--brand-deep); cursor: pointer; }
+.retrieval-sources p { white-space: pre-wrap; color: var(--muted); }
+
 html, body {
   margin: 0;
   padding: 0;

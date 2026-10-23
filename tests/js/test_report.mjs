@@ -4,7 +4,7 @@
  * CSV: escaping, injection guard, BOM, header/row counts, round-trip via a
  * minimal parser. Stats: dashboard-matching aggregation. PDF: built with the
  * vendored jsPDF + autotable (a module resolver shim lets autotable's CJS
- * branch find "jspdf"), asserting pagination with a repeating header.
+ * branch find "jspdf"), asserting complete text, monochrome output and pagination.
  */
 
 import test from "node:test";
@@ -13,6 +13,8 @@ import Module from "node:module";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
+import AIView from "../../static/ai-panel.js";
 
 /* --------------------------------------------------- jspdf resolve shim */
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -167,7 +169,7 @@ test("pdf with zero rows fits one page", () => {
   assert.equal(doc.getNumberOfPages(), 1);
 });
 
-test("pdf paginates with repeating header for many rows", () => {
+test("pdf paginates all questions with page numbers for a long session", () => {
   const many = Array.from({ length: 60 }, (_, i) =>
     record({
       question: `Question number ${i} asking about a fairly long topic with several words to force wrapping`,
@@ -181,5 +183,46 @@ test("pdf paginates with repeating header for many rows", () => {
   const raw = doc.output(); // uncompressed content streams
   assert.ok(raw.includes("QNext - Q&A Report"));
   assert.ok(raw.includes("Question number 0"));
-  assert.ok(raw.includes("page 2"));
+  assert.ok(raw.includes("Question number 59"));
+  assert.ok(raw.includes("Page 2 of"));
+  assert.ok(doc.internal.pageSize.getHeight() > doc.internal.pageSize.getWidth());
+});
+
+test("PDF exports session history as monochrome question, retrieval and AI sections", () => {
+  const records = [
+    { question: 'What is machine learning?', result: {
+      retrieval: { answer: 'Machine learning finds patterns in data.' },
+      ai: { status: 'success', model: 'DO-NOT-EXPORT-MODEL',
+        answer: '**Learning:** A model learns from examples [P1, P2].' },
+    } },
+    { question: 'Explain photosynthesis.', result: {
+      retrieval: { reason: 'no_dataset', answer: null },
+      ai: { status: 'success', answer: 'Plants use light to produce sugars.' },
+    } },
+    { question: 'Where is the laboratory?', result: {
+      retrieval: { answer: 'The laboratory is in London.' }, ai: { status: 'disabled' },
+    } },
+    { question: 'How does learning work?', result: {
+      retrieval: { answer: 'Training uses labelled examples.' },
+      ai: { status: 'unavailable', message: 'SECRET-PROVIDER-ERROR' },
+    } },
+    { question: 'Explain the complete process.', result: {
+      retrieval: { answer: 'Original evidence begins here. '.repeat(220) + 'EVIDENCE-END' },
+      ai: { status: 'success', answer: 'A detailed explanation with multiple steps. '.repeat(240) + 'EXPLANATION-END' },
+    } },
+  ];
+  const before = structuredClone(records);
+  const doc = Report.buildPdf(records, { exportDate: '2026-10-23', formatExplanation: AIView.explanationText }, jsPDF);
+  const raw = doc.output();
+  for (let i = 1; i <= records.length; i++) assert.ok(raw.includes('Question ' + i));
+  for (const text of ['Retrieved Text', 'AI Explanation', 'Learning: A model learns from examples.',
+    'No dataset was loaded.', 'AI explanations were off', 'AI explanation was unavailable',
+    'EVIDENCE-END', 'EXPLANATION-END']) assert.ok(raw.includes(text), text);
+  assert.doesNotMatch(raw, /DO-NOT-EXPORT-MODEL|SECRET-PROVIDER-ERROR|\[P1|\*\*Learning|Avg confidence|Categories:/);
+  assert.doesNotMatch(raw, /\d(?:\.\d+)? \d(?:\.\d+)? \d(?:\.\d+)? (?:rg|RG)\b/);
+  assert.deepEqual(records, before);
+  assert.ok(doc.getNumberOfPages() > 2);
+  if (process.env.QNEXT_PDF_PROOF) {
+    fs.writeFileSync(process.env.QNEXT_PDF_PROOF, Buffer.from(doc.output('arraybuffer')));
+  }
 });

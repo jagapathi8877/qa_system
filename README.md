@@ -15,7 +15,25 @@ python -m venv .venv
 .venv\Scripts\python.exe app.py
 ```
 
-Open http://127.0.0.1:5000. Preparation needs internet access and substantial disk space. Four default reader/retrieval/verifier revisions are pinned; preparation records commit IDs and SHA256 hashes in `.models/preparation.json`. Models are ignored generated artifacts. This audited checkout also has a tested environment at the parent `audit/.venv`.
+Open http://127.0.0.1:5000. Preparation needs internet access and substantial disk space. Four default reader/retrieval/verifier revisions are pinned; preparation records commit IDs and SHA256 hashes in `.models/preparation.json`. Models are ignored generated artifacts. This checkout has a tested Python 3.12.14 environment at `.venv`.
+
+## Optional Gemini explanations
+
+The local retrieval engine still produces the original **Retrieved Text**, evidence and no-answer result. A separate **AI-Generated Explanation** explains selected evidence, labels general knowledge, and communicates incomplete or conflicting evidence. The browser defaults AI on; turning it off prevents generation on the backend. Missing credentials and Gemini failures leave retrieval available. Questions and selected original passages are sent to Google only for explicitly AI-enabled requests.
+
+Copy `.env.example` to `.env` and fill `GEMINI_API_KEY_1` / `GEMINI_PROJECT_ID_1` / `GEMINI_ACCOUNT_LABEL_1`. Slots 2 and 3 support independently authorized projects/accounts; one slot also works. Use opaque account labels, not emails. Restart after changing configuration. The server does not verify ownership from a declared project ID; operators must check the actual key/project/account association in Google AI Studio and Cloud Console.
+
+Stable defaults, verified in Google's documentation on 23 October 2026: `gemini-3.8-flash`, `gemini-3.6-flash`, then `gemini-3.5-flash-lite`. Generation uses the official `google-genai==2.33.0` SDK. [Full configuration, quota policy, API, tests, evaluation rubric and troubleshooting](docs/AI_INTEGRATION.md).
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env locally; never paste keys into frontend files or commit them.
+.venv\Scripts\python.exe scripts/check_gemini.py
+# Explicit, optional network checks; catalogue sends no document content:
+.venv\Scripts\python.exe scripts/check_gemini.py --catalogue
+.venv\Scripts\python.exe scripts/check_gemini.py --live --slot 1
+.venv\Scripts\python.exe app.py
+```
 
 Executive summaries additionally need:
 
@@ -35,13 +53,13 @@ Inference reads prepared models or an existing Hugging Face cache without networ
 
 ## API and limits
 
-`POST /api/paste` takes `{text}`; `POST /api/upload` takes multipart `file`; `POST /api/ask` takes `{question, retriever?, threshold?}`. Other endpoints: `POST /api/sample`, `GET /api/dataset`, `DELETE /api/dataset`, `GET /api/suggest`, `POST /api/summarize`, `GET /api/stats`, `GET /api/history`, `GET /api/health`.
+`POST /api/paste` takes `{text}`; `POST /api/upload` takes multipart `file`; `POST /api/ask` takes `{question, retriever?, threshold?, ai_mode?, defer_ai?}`. Legacy requests that omit `ai_mode` remain retrieval-only. The original fields are unchanged; `retrieval`, `ai` and `request_id` are additive. The UI uses deferred generation through `POST /api/explain` so evidence appears before AI completes. Other endpoints: `POST /api/sample`, `GET /api/dataset`, `DELETE /api/dataset`, `GET /api/suggest`, `POST /api/summarize`, `GET /api/stats`, `GET /api/history`, `GET /api/health`, `GET /api/ai/status`, `GET /api/ai/stats`.
 
 Invalid JSON schemas, question types, empty questions, modes and thresholds return JSON 400 before counters change. Parsing/content failures use 422, request-size failures 413. Limits: 2,000,000 text characters, 5,000 bounded passages, 1,000 question characters, 25 MiB request bodies, 100 MiB expanded Office archives. Malformed CSV quoting, surplus cells, duplicate/empty headers are rejected. Nested JSON preserves paths; DOCX preserves body paragraph/table ordering. PDF/PPT layout and unusual encodings remain format-specific limitations.
 
 State and caches are **ephemeral, single-process memory**. Use one process; independent workers do not share datasets. Restart loses state. There are at most 50 loaded sessions. Idle entries can expire after one hour when admitting another corpus. Capacity returns 503 rather than silently evicting an active dataset. Session operations are serialized; CPU inference is bounded. These controls are not a universal memory budget or public deployment architecture.
 
-`/api/history` keeps the latest 1,000 Q&A records with corpus identity. The frozen frontend does not restore these records on reload. Browser exports can still mix earlier questions under a replacement document name. Source/retriever/confidence fields exist in the API; corresponding controls are not promised in the current interface. Browser speech recognition may use the browser vendor's service.
+`/api/history` keeps the latest 1,000 Q&A records with corpus identity and separate AI output. The frontend does not restore the answer cards on reload. PDF exports read this server session history, including questions from before a page refresh, and present numbered questions, retrieved text and AI explanations in a plain black-on-white portrait report. Long answers continue across pages; disabled or unavailable AI is labelled. Resetting the session or restarting the server clears this history. CSV retains its existing retrieval-only schema and current-page log. Source passages are expandable in the answer card; retriever/confidence fields also exist in the API. Browser speech recognition may use the browser vendor's service.
 
 Debug defaults off. Development generates a random signing secret per process. `QUILLQA_ENV=production` requires a private `QUILLQA_SECRET` of at least 32 characters. Persistent shared storage, authentication, TLS deployment and frontend history/export integration remain separate work. This is not a production-readiness claim.
 
@@ -52,7 +70,8 @@ Model configuration: `QUILLQA_QA_MODEL`, `QUILLQA_EMBEDDER_MODEL`, `QUILLQA_RERA
 ```powershell
 .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .venv\Scripts\python.exe -m pytest tests -q
-node --test tests/js/test_speech_input.mjs tests/js/test_report.mjs
+node --test tests/js/test_speech_input.mjs tests/js/test_report.mjs tests/js/test_ai_panel.mjs
+.venv\Scripts\python.exe scripts/evaluate_ai.py --output docs/verification/offline-evaluation.json
 ```
 
 Real-model tests need prepared models, including the optional summarizer. `-m "not slow"` skips marked integrations but some historical tests still call the reader. The [implementation report](docs/IMPLEMENTATION_REPORT.md) and [file-level change record](docs/CHANGELOG.md) describe the verified changes and remaining limitations. In the original local workspace, parent folders `audit/` and `phase2/2026-10-22-quality/` retain baselines, frozen question sets and raw responses; those local artifacts are excluded from this source repository. Small synthetic regression scores are not general benchmark accuracy.

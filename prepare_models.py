@@ -26,7 +26,25 @@ def main():
         target=models.MODEL_CACHE/name.replace('/','--')
         snapshot_download(name,revision=revision,local_dir=str(target),allow_patterns=['*.json','*.txt','*.safetensors','*.model'],ignore_patterns=['onnx/*','openvino/*','*.onnx'],max_workers=2)
         if not (target/'model.safetensors').exists():
-            raise RuntimeError('Safe model weights are missing for '+name)
+            if role != 'summarizer' or name != 'sshleifer/distilbart-cnn-6-6':
+                raise RuntimeError('Safe model weights are missing for '+name)
+            # This upstream summarizer publishes only a legacy state dict.
+            # Read tensors with torch's restricted loader, never arbitrary
+            # pickle execution, then save safe weights for offline inference.
+            import torch
+            from transformers import AutoConfig, AutoModelForSeq2SeqLM
+            snapshot_download(name,revision=revision,local_dir=str(target),
+                              allow_patterns=['pytorch_model.bin'],max_workers=1)
+            weights=torch.load(target/'pytorch_model.bin',map_location='cpu',weights_only=True)
+            if not isinstance(weights,dict) or any(not isinstance(k,str) or not isinstance(v,torch.Tensor) for k,v in weights.items()):
+                raise RuntimeError('The summarizer artifact is not a tensor state dictionary.')
+            model=AutoModelForSeq2SeqLM.from_config(AutoConfig.from_pretrained(str(target),local_files_only=True))
+            if ('lm_head.weight' not in weights and 'model.shared.weight' in weights
+                    and model.config.tie_word_embeddings
+                    and model.lm_head.weight.data_ptr()==model.model.shared.weight.data_ptr()):
+                weights['lm_head.weight']=weights['model.shared.weight']
+            model.load_state_dict(weights,strict=True)
+            model.save_pretrained(str(target),safe_serialization=True)
         files={str(f.relative_to(target)):hashlib.sha256(f.read_bytes()).hexdigest() for f in target.rglob('*') if f.is_file() and '.cache' not in f.parts and f.name!='quillqa_manifest.json'}
         record={'model_id':name,'revision':revision,'files':files}
         (target/'quillqa_manifest.json').write_text(json.dumps(record,indent=2))

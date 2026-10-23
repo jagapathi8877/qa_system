@@ -1,4 +1,4 @@
-# QNext — pinned, mutually compatible versions (Python 3.9–3.12)
+# QNext — pinned, mutually compatible versions (Python 3.10–3.12)
 Flask==3.0.3
 Werkzeug==3.0.6
 numpy==1.26.4
@@ -16,3 +16,7 @@ transformers==4.44.2
 
 # Optional retrieval mode — semantic embeddings (SBERT), loaded lazily
 sentence-transformers==3.0.1
+
+# Separate, server-side Gemini explanation layer (Python >=3.10)
+google-genai==2.33.0
+python-dotenv==1.0.1

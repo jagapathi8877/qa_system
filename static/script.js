@@ -15,7 +15,10 @@ const state = {
   summaryBusy: false,
   exportBusy: false,
   retriever: "tfidf",
+  aiMode: true,
+  datasetRevision: 0,
   log: [], // SessionRecords for the export report
+  sessionQuestionCount: 0,
   datasetSource: null,
   recent: [], // last few {question, answered}
 };
@@ -182,8 +185,13 @@ async function loadSample() {
 }
 
 function onIngested(data) {
+  state.datasetRevision += 1;
   state.datasetLoaded = true;
   state.datasetSource = data.source;
+  $("answerCard").hidden = true;
+  $("aiPanel").hidden = true;
+  $("emptyState").hidden = false;
+  $("emptyState").style.display = "";
   setDatasetPill(true, data.source);
   showIngestStatus(
     "ok",
@@ -267,6 +275,10 @@ $("sampleBtn").addEventListener("click", loadSample);
 
 const askForm = $("askForm");
 const questionInput = $("questionInput");
+AIView.bindToggle(document, (enabled) => {
+  state.aiMode = enabled;
+  if (!state.aiMode) $("aiPanel").hidden = true;
+});
 
 /* ------------------------------ theme (dark mode) ------------------------ */
 
@@ -507,7 +519,9 @@ async function loadSuggestions() {
 }
 
 function setBusy(busy) {
+  $("aiMode").disabled = busy;
   state.busy = busy;
+  updateExportButtons();
   micBtn.disabled = busy || !speechCtl.supported;
   micBtn.disabled = busy || !speechCtl.supported;
   $("skeleton").hidden = !busy;
@@ -515,32 +529,36 @@ function setBusy(busy) {
     $("emptyState").hidden = true;
     $("emptyState").style.display = "none";
     $("answerCard").hidden = true;
+    AIView.render(state.aiMode ? { status: "pending" } : { status: "disabled" }, document);
   }
 }
 
 async function askQuestion() {
   const question = questionInput.value.trim();
   if (!question) return toast("Type a question first.");
-  if (!state.datasetLoaded) return toast("Load a dataset first (step 1).");
+  if (!state.datasetLoaded && !state.aiMode) return toast("Turn on AI explanations or load a dataset first.");
   if (state.busy) return;
   speechCtl.stop(); // never keep the mic open across a submit
 
   setBusy(true);
+  const revision = state.datasetRevision;
   try {
-    const result = await api("/api/ask", {
-      method: "POST",
-      body: JSON.stringify({ question, retriever: state.retriever }),
+    const result = await AIView.ask({
+      question, retriever: state.retriever, enabled: state.aiMode, api,
+      onRetrieval: (result) => { if (revision === state.datasetRevision) renderAnswer(result); },
+      onAI: (ai) => { if (revision === state.datasetRevision) AIView.render(ai, document); },
     });
-    renderAnswer(result);
+    if (revision !== state.datasetRevision) return;
     logQuestion(question, result);
     state.recent.unshift({
       question,
-      answered: result.status === "answered" || result.status === "summarized",
+      answered: result.status === "answered" || result.status === "summarized" || result.ai?.status === "success",
     });
     state.recent = state.recent.slice(0, 4);
     renderRecent();
     await refreshStats();
   } catch (err) {
+    $("aiPanel").hidden = true;
     if (err.status === 409) {
       toast(err.message);
       state.datasetLoaded = false;
@@ -565,12 +583,16 @@ function renderAnswer(result) {
 
   $("emptyState").hidden = true;
   $("emptyState").style.display = "none";
-  card.hidden = false;
+  card.hidden = result.reason === "no_dataset";
   card.classList.toggle("is-no", !answered && !isSummary);
   card.classList.toggle("is-summary", isSummary);
-  $("answerLabel").textContent = isSummary
-    ? (result.category || "Summary")
-    : "Answer";
+  $("skeleton").hidden = true;
+  $("answerLabel").textContent = "Retrieved Text";
+  AIView.render(result.ai, document);
+  AIView.sources(result, document);
+  const note = $("retrievalNote");
+  note.hidden = result.status !== "no_answer" || !["no_relevant_evidence", "no_explicit_definition"].includes(result.reason);
+  note.textContent = "This information was not found by the document retrieval engine. The original retrieval result is shown above.";
 
   // Highlight the model's extracted span inside the composed answer sentence (case-insensitively).
   const answerEl = $("answerText");
@@ -719,6 +741,9 @@ function logQuestion(question, result) {
     retriever: result.retriever,
     source_passage_id: result.passage_index,
     status: result.status,
+    ai: result.ai,
+    corpus_id: result.corpus_id,
+    source: result.source,
   });
   updateExportButtons();
 }
@@ -726,9 +751,10 @@ function logQuestion(question, result) {
 function updateExportButtons() {
   const hasRows = state.log.length > 0;
   [exportCsvBtn, exportPdfBtn].forEach((btn) => {
-    btn.disabled = !hasRows || state.exportBusy;
-    btn.title = hasRows
-      ? "Download the Q&A report (" + state.log.length + " question" + (state.log.length === 1 ? "" : "s") + ")"
+    const available = btn === exportPdfBtn ? hasRows || state.sessionQuestionCount > 0 : hasRows;
+    btn.disabled = !available || state.exportBusy || state.busy;
+    btn.title = available
+      ? "Download this session's Q&A report"
       : "Ask a question first — there is nothing to export yet";
   });
 }
@@ -753,14 +779,17 @@ exportCsvBtn.addEventListener("click", () => {
   toast("CSV report downloaded.");
 });
 
-exportPdfBtn.addEventListener("click", () => {
-  if (!state.log.length || typeof Report.buildPdf !== "function") return;
+exportPdfBtn.addEventListener("click", async () => {
+  if (state.exportBusy || state.busy || typeof Report.buildPdf !== "function") return;
   state.exportBusy = true;
   updateExportButtons();
+  const revision = state.datasetRevision;
   try {
-    const doc = Report.buildPdf(state.log, {
-      datasetName: state.datasetSource || "Dataset",
+    const history = await api("/api/history");
+    if (revision !== state.datasetRevision) return;
+    const doc = Report.buildPdf(history.records, {
       exportDate: new Date().toLocaleString(),
+      formatExplanation: AIView.explanationText,
     }, window.jspdf.jsPDF);
     doc.save(Report.stamp() + ".pdf");
     toast("PDF report downloaded.");
@@ -777,25 +806,30 @@ exportPdfBtn.addEventListener("click", () => {
 $("resetBtn").addEventListener("click", async () => {
   try {
     await api("/api/dataset", { method: "DELETE" });
+    state.datasetRevision += 1;
     state.datasetLoaded = false;
     state.recent = [];
     setDatasetPill(false);
     $("ingestStatus").hidden = true;
     $("pasteText").value = "";
     $("answerCard").hidden = true;
+    $("aiPanel").hidden = true;
     $("recentList").hidden = true;
     $("recentItems").innerHTML = "";
     $("emptyState").hidden = false;
     $("emptyState").style.display = "";
     $("answerCard").classList.remove("is-summary");
-    $("answerLabel").textContent = "Answer";
+    $("answerLabel").textContent = "Retrieved Text";
     $("simpleBlock").hidden = true;
     state.log = []; // the report log dies with the session
+    state.sessionQuestionCount = 0;
     updateExportButtons();
     setSummaryEnabled(false);
     hideExecSummary();
     await refreshStats();
-    toast("Session reset — load a new dataset to continue.");
+    $("exampleChips").replaceChildren();
+    state.datasetSource = null;
+    toast("Session reset — ask with AI or load a new dataset.");
   } catch (err) {
     toast(err.message);
   }
@@ -812,6 +846,10 @@ $("resetBtn").addEventListener("click", async () => {
     /* first visit — fine */
   }
   setSummaryEnabled(state.datasetLoaded);
+  try {
+    const history = await api("/api/history");
+    state.sessionQuestionCount = history.records.length;
+  } catch (_) { /* History can be retried when exporting. */ }
   hideExecSummary();
   updateExportButtons();
   if (state.datasetLoaded) {
